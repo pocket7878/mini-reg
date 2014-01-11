@@ -10,7 +10,7 @@ name:                mini-reg
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.1.0.0
+version:             0.2.0.0
 
 -- A short (one-line) description of the package.
 -- synopsis:            
@@ -65,3 +65,11 @@ library
   -- Base language which the package is written in.
   default-language:    Haskell2010
   
+
+Test-Suite      spec
+  Type: exitcode-stdio-1.0
+  Default-Language:     Haskell2010
+  Hs-Source-Dirs:       test
+  Ghc-Options:  -Wall
+  Main-Is:      MiniRegSpec.hs
+  Build-Depends:        base, hspec >=1.5.0 && <1.8.0 || >1.8.0, mini-reg
