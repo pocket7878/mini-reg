@@ -4,7 +4,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Reg where
 
-data RegTerm a = Take a 
+import  Text.Show.Functions
+
+data RegTerm a = Is (a -> Bool)
 data RegExp  a = Or (Either (RegTerm a) (RegExp a)) (Either (RegTerm a) (RegExp a)) | And (Either (RegTerm a) (RegExp a)) (Either (RegTerm a) (RegExp a)) | Star (Either (RegTerm a) (RegExp a)) | Lone (Either (RegTerm a) (RegExp a)) | Some (Either (RegTerm a) (RegExp a))
 type Reg a = (Either (RegTerm a) (RegExp a))
 
@@ -27,15 +29,18 @@ or a b = (Right (Or a b))
 (||) :: Reg a -> Reg a -> Reg a
 (||) = Reg.or
 
-get :: a -> Reg a
-get a = (Left (Take a))
+get :: (Eq a,Show a) => a -> Reg a
+get a = (Left (Is (\x -> x == a)))
 
-gets :: [a] -> Reg a
-gets (x:y:[]) = (Right (And (Left (Take x)) (Left (Take y))))
-gets (x:ys) = (Right (And (Left (Take x)) (gets ys)))
+gets :: (Eq a, Show a) => [a] -> Reg a
+gets (x:y:[]) = (Right (And (get x) (get y)))
+gets (x:ys) = (Right (And (get x) (gets ys)))
+
+is :: (a -> Bool) -> Reg a
+is f = (Left (Is f))
 
 instance Show a => Show (RegTerm a) where
-    show (Take a) = show a
+    show (Is a) = "#<Is>"
 
 instance Show a => Show (RegExp a) where
     show (Or a b) = (show a) ++ "+" ++ (show b)

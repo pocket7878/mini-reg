@@ -9,23 +9,27 @@ import Control.Lens
 import qualified DFA as D (State(State), Input(Input), Rule(Rule), DFA, mkDFA)
 import qualified Debug.Trace as De
 
-data Input a = Input a | Epsilon deriving (Show, Eq)
-             
-data Rule a b = Rule (D.State a) (Input b) (D.State a) deriving (Show, Eq)
+data Epsilon = Epsilon deriving (Show, Eq)
 
-matchRule :: (Eq a, Eq b) => Input b -> D.State a -> [Rule a b] -> [Rule a b]
-matchRule i cs rs = 
-    L.filter (\(Rule c ii _) -> (cs == c) && (i == ii)) rs
+data Rule a b = Rule (D.State a) (Either (b -> Bool) Epsilon) (D.State a) deriving (Show)
+
+matchRule :: (Eq a) => D.Input b -> D.State a -> [Rule a b] -> [Rule a b]
+matchRule (D.Input i) cs rs = 
+    L.filter (\(Rule c y _) -> case y of
+                                 (Left f) -> (cs == c) && (f i)
+                                 (Right _) -> False) rs
 
 --Epsilonルール１ステップで移動可能な状態の集合を得る
-eclose' :: (Eq a, Eq b) => D.State a -> [Rule a b] -> [D.State a]
+eclose' :: (Eq a) => D.State a -> [Rule a b] -> [D.State a]
 eclose' s rs = enext
   where
-    erule = L.filter (\(Rule x i _) -> (x == s) && (i == Epsilon)) rs
+    erule = L.filter (\(Rule x y _) -> case y of
+                                         (Right _) -> (x == s)
+                                         (Left _) -> False) rs
     enext = L.map (\(Rule _ _ ns) -> ns) erule
 
 --Epsilonルールで移動可能な状態の集合を得る
-eclose'' :: (Eq a, Eq b) => [D.State a] -> [Rule a b] -> [D.State a] -> [D.State a]
+eclose'' :: (Eq a) => [D.State a] -> [Rule a b] -> [D.State a] -> [D.State a]
 eclose'' s rs acc
   | epNexts == [] = acc
   | otherwise = eclose'' s rs (acc ++ epNexts)
@@ -33,7 +37,7 @@ eclose'' s rs acc
     epNexts = L.filter (\es -> not (elem es acc)) $ 
                 concat $ L.map (\a -> eclose' a rs) acc
 
-eclose :: (Eq a, Eq b) => [D.State a] -> [Rule a b] -> [D.State a]
+eclose :: (Eq a) => [D.State a] -> [Rule a b] -> [D.State a]
 eclose s rs = eclose'' s rs s
 
 data EpsilonNFA a b = EpsilonNFA {
@@ -41,10 +45,10 @@ data EpsilonNFA a b = EpsilonNFA {
                 ,_currState :: [D.State a]
                 ,_rules :: [Rule a b]
                 ,_goalState :: [D.State a]
-                } deriving (Show, Eq)
+                } deriving (Show)
 $(makeLenses ''EpsilonNFA)
 
-mkEpsilonNFA :: (Eq a, Eq b) => D.State a -> [Rule a b] -> [D.State a] -> EpsilonNFA a b
+mkEpsilonNFA :: (Eq a) => D.State a -> [Rule a b] -> [D.State a] -> EpsilonNFA a b
 mkEpsilonNFA s rs gs = EpsilonNFA {
                 _fstState = s
                 ,_currState = eclose [s] rs
@@ -52,23 +56,23 @@ mkEpsilonNFA s rs gs = EpsilonNFA {
                 ,_goalState = gs
                 }
 
-updateEpsilonNFA :: (Eq a, Eq b) => EpsilonNFA a b -> Input b -> Maybe (EpsilonNFA a b)
+updateEpsilonNFA :: (Eq a) => EpsilonNFA a b -> D.Input b -> Maybe (EpsilonNFA a b)
 updateEpsilonNFA enfa i = updateEpsilonNFA' enfa nxtStates
   where
     rs = concat $ L.map (\s -> matchRule i s (enfa^.rules))
                         (enfa^.currState)
     nxtStates = eclose (L.map (\(Rule _ _ ns) -> ns) rs) (enfa^.rules)
-    updateEpsilonNFA' :: (Eq a, Eq b) => EpsilonNFA a b -> [D.State a] -> Maybe (EpsilonNFA a b)
+    updateEpsilonNFA' :: (Eq a) => EpsilonNFA a b -> [D.State a] -> Maybe (EpsilonNFA a b)
     updateEpsilonNFA' _ [] = Nothing
     updateEpsilonNFA' nfa ns = Just (nfa&currState.~ns)
 
-runEpsilonNFA :: (Eq a, Eq b) => EpsilonNFA a b -> [Input b] -> Maybe (EpsilonNFA a b)
+runEpsilonNFA :: (Eq a) => EpsilonNFA a b -> [D.Input b] -> Maybe (EpsilonNFA a b)
 runEpsilonNFA enfa is = foldM updateEpsilonNFA enfa is
 
-accept :: (Eq a, Eq b) => EpsilonNFA a b -> [Input b] -> Bool
+accept :: (Eq a) => EpsilonNFA a b -> [b] -> Bool
 accept enfa is = accept' res
   where
-    res = runEpsilonNFA enfa is
+    res = runEpsilonNFA enfa $ L.map (\x -> (D.Input x)) is
     accept' Nothing = False
     accept' (Just f) = L.any (\s -> elem s (f^.goalState)) (f^.currState)
 
@@ -76,29 +80,29 @@ accept enfa is = accept' res
 - Convert Epsilon-NFA -> DFA
 -}
 
-enfaInput2dfaInput :: Input a -> D.Input a
-enfaInput2dfaInput (Input a) = D.Input a
-enfaInput2dfaInput (Epsilon) = error "Can't convert epsilon to dfa-input"
-
 type ENFARule a b = Rule a b
 type DFARule a b = D.Rule (Set a) b
-genDFARule' :: forall a b. (Eq a, Eq b, Ord a) => (D.State (Set a)) -> [ENFARule a b] -> [DFARule a b]
+genDFARule' :: forall a b. (Ord a) => (D.State (Set a)) -> [ENFARule a b] -> [DFARule a b]
 genDFARule' (D.State s) rs = L.map nxt matchedRules
   where
     matchedRules :: [ENFARule a b] 
-    matchedRules = L.filter (\(Rule (D.State x) i _) -> (member x s) && (i /= Epsilon)) rs
+    matchedRules = L.filter (\(Rule (D.State x) y _) -> case y of
+                                                          (Right _) -> False
+                                                          (Left _) -> (member x s)) rs
     nxt ::  ENFARule a b -> DFARule a b
-    nxt (Rule (D.State f) i t) = D.Rule (D.State s) (enfaInput2dfaInput i) (D.State (fromList (L.map (\(D.State x) -> x) (eclose [t] rs))))
+    nxt (Rule (D.State f) (Left i) t) = D.Rule (D.State s) i (D.State (fromList (L.map (\(D.State x) -> x) (eclose [t] rs))))
+    nxt (Rule _ (Right Epsilon) t) = error "Can't convert epsilon rule to dfa-rule. (Illigal state)"
 
-genDFARule'' :: (Eq a, Eq b, Ord a, Show a, Show b) => [ENFARule a b] -> [DFARule a b] -> [DFARule a b] -> [DFARule a b]
-genDFARule'' rs acc tmpAcc
-  | newRules == [] = acc ++ newRules
-  | otherwise = genDFARule'' rs (newRules ++ acc) newRules
+genDFARule'' :: forall a b. (Ord a) => [ENFARule a b] -> [DFARule a b] -> [D.State (Set a)] -> [D.State (Set a)] -> [DFARule a b]
+genDFARule'' rs acc visitedStates tmpStates
+  | L.null newTmpStates = acc ++ generatedRules
+  | otherwise = genDFARule'' rs (generatedRules ++ acc) (visitedStates ++ newTmpStates) newTmpStates
   where
-    generatedRules = concat $ L.map (\(D.Rule _ _ x) -> genDFARule' x rs) tmpAcc
-    newRules = L.filter (\x -> not ((elem x acc) || (elem x tmpAcc))) generatedRules
+    generatedRules :: [DFARule a b]
+    generatedRules = concat $ L.map (\x -> genDFARule' x rs) tmpStates
+    newTmpStates = L.filter (\x -> not (elem x visitedStates)) $ L.map (\(D.Rule _ _ x) -> x) generatedRules
 
-genDFA :: forall a b. (Eq a, Eq b,Ord a, Show a, Show b) => EpsilonNFA a b -> D.DFA (Set a) b
+genDFA :: forall a b. (Ord a) => EpsilonNFA a b -> D.DFA (Set a) b
 genDFA enfa = D.mkDFA fst dfaRules dfaGoal
   where
     fstClose = eclose [(enfa^.fstState)] (enfa^.rules)
@@ -106,5 +110,6 @@ genDFA enfa = D.mkDFA fst dfaRules dfaGoal
     fst = D.State $ fromList $ L.map (\(D.State x) -> x) fstClose
     enfaRules = enfa^.rules
     fstDFARules = genDFARule' fst enfaRules
-    dfaRules = (genDFARule'' enfaRules fstDFARules fstDFARules)
-    dfaGoal = L.filter (\(D.State t) -> any (\(D.State x) -> member x t) (enfa^.goalState)) $ L.map (\(D.Rule _ _ g) -> g) dfaRules
+    fstTmpStates = L.filter (\x -> x /= fst) $ L.map (\(D.Rule _ _ x) -> x) fstDFARules
+    dfaRules = (genDFARule'' enfaRules fstDFARules [fst] fstTmpStates)
+    dfaGoal = L.nub $ L.filter (\(D.State t) -> any (\(D.State x) -> member x t) (enfa^.goalState)) $ [fst] ++ (L.map (\(D.Rule _ _ g) -> g) dfaRules)
