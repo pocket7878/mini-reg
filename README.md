@@ -5,7 +5,7 @@ This is my learning project.
 
 ##Feature
 
-Reguler matching on Ord instances List.
+Reguler matching on List.
 
 ```haskell
 import qualified Reg as R
